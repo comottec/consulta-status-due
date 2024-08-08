@@ -10,6 +10,42 @@ import configparser
 import xlsxwriter
 import tempfile
 import hashlib
+import time
+
+MAX_REQUEST_TRIES=3
+REQUEST_DELAY=0.5
+PRINT_MSG=None 
+
+def myRequest(url,headers,cert=None,params=None,nTries=0):
+   msg_error=""
+   status_code=None
+
+   try:
+      result = requests.get(
+         url, 
+         headers=headers, 
+         cert=cert,
+         params=params
+      )
+      if not result.ok:
+         if result.status_code == 429:
+            status_code=result.status_code
+            msg_error=result.reason
+
+   except ConnectionResetError:
+      status_code=504
+      msg_error="ConnectionResetError"
+
+   if not status_code is None:
+      if nTries == MAX_REQUEST_TRIES:
+         result = {"ok": False, "status_code": status_code, "reason": msg_error}
+         return result
+      if not PRINT_MSG is None:
+         PRINT_MSG(f"Nova tentativa de conexão... {msg_error}")
+      time.sleep(REQUEST_DELAY)
+      result = myRequest(url, headers=headers, cert=cert, params=params, nTries=nTries+1)
+
+   return result 
 
 class dotdict(dict):
    """dot.notation access to dictionary attributes"""
@@ -203,7 +239,7 @@ def autenticarPU(aHeaderRet={}):
    url = PORTAL_UNICO_HOST+PORTAL_UNICO_URL_AUTENTICAR
    certs = (getCeritificatePEMFile(),getCeritificateKEYFile())
 
-   result = requests.get(
+   result = myRequest(
       url, 
       headers=headers, 
       cert=certs
@@ -294,7 +330,7 @@ def consultaDUE(headers, chave_nfe, resultDUE):
    hasLicense = hasLicenseForNFE(chave_nfe)
    result = None
    if hasLicense:
-      result = requests.get(
+      result = myRequest(
          url, 
          params=requestParams,
          headers=headers, 
@@ -319,7 +355,7 @@ def consultaDUE(headers, chave_nfe, resultDUE):
    
    url = json[0]["href"]
    requestParams={}
-   result = requests.get(
+   result = myRequest(
       url, 
       params=requestParams,
       headers=headers, 
@@ -441,6 +477,9 @@ def processarConsulta(listaChaveNFe):
             window[BTN_ACAO].update(text="Cancelar")
 
       return True
+   
+   global PRINT_MSG
+   PRINT_MSG=sg.cprint
 
    while not signals["userCancelled"]:      
       event, values = window.read(timeout=100)       # type: (str, dict)      
@@ -501,6 +540,7 @@ def processarConsulta(listaChaveNFe):
 
 
    window.close()
+   PRINT_MSG=None
 
    return result
 
